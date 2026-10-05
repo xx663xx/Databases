@@ -1,35 +1,24 @@
--- 1. Количество пачек измерений у каждого пользователя
 SELECT
     usr.code AS user_code,
     usr.full_name,
-    batch_counts.batch_count
+    COALESCE(user_counts.measurement_count, 0) AS measurement_count
 FROM public.users AS usr
 LEFT JOIN
 (
     SELECT
         user_code,
-        COUNT(*) AS batch_count
+        COUNT(*) AS measurement_count
     FROM public.batches
     GROUP BY user_code
-) AS batch_counts
-    ON usr.code = batch_counts.user_code
-ORDER BY usr.code;
+) AS user_counts
+    ON usr.code = user_counts.user_code
+ORDER BY user_code;
 
--- 2. Поиск пустых пачек без параметров
+
 SELECT
     batch.code AS batch_code,
     batch.measured_at,
-    batch.user_code
-FROM public.batches AS batch
-LEFT JOIN public.parameters AS param
-    ON batch.code = param.batch_code
-WHERE param.code IS NULL
-ORDER BY batch.code;
-
--- 3. Поиск пачек, в которых количество параметров отличается от пяти
-SELECT
-    batch.code AS batch_code,
-    param_counts.parameter_count
+    COALESCE(batch_counts.parameter_count, 0) AS parameter_count
 FROM public.batches AS batch
 LEFT JOIN
 (
@@ -38,70 +27,79 @@ LEFT JOIN
         COUNT(*) AS parameter_count
     FROM public.parameters
     GROUP BY batch_code
-) AS param_counts
-    ON batch.code = param_counts.batch_code
-WHERE param_counts.parameter_count < 5
-   OR param_counts.parameter_count > 5
-   OR param_counts.batch_code IS NULL
-ORDER BY batch.code;
+) AS batch_counts
+    ON batch_counts.batch_code = batch.code
+WHERE COALESCE(batch_counts.parameter_count, 0) = 0
+ORDER BY batch_code;
 
--- 4.1. Минимум и максимум каждого типа параметра для сверки с диапазонами ТЗ
+
 SELECT
-    param_type.name AS parameter_name,
-    value_stats.min_value,
-    value_stats.max_value
-FROM
+    batch.code AS batch_code,
+    batch.user_code,
+    COALESCE(batch_counts.parameter_count, 0) AS parameter_count
+FROM public.batches AS batch
+LEFT JOIN
 (
     SELECT
-        parameter_type_code,
-        MIN(parameter_value) AS min_value,
-        MAX(parameter_value) AS max_value
-    FROM public.parameters
-    GROUP BY parameter_type_code
-) AS value_stats
-LEFT JOIN public.parameter_types AS param_type
-    ON value_stats.parameter_type_code = param_type.code
-ORDER BY value_stats.parameter_type_code;
-
--- 4.2. Поиск дробных значений там, где по ТЗ требуются целые
-SELECT
-    checked.code AS parameter_code,
-    checked.batch_code,
-    param_type.name AS parameter_name,
-    checked.parameter_value
-FROM
-(
-    SELECT
-        code,
         batch_code,
-        parameter_type_code,
-        parameter_value,
-        CAST(parameter_value AS DECIMAL(10, 0)) AS whole_value
+        COUNT(*) AS parameter_count
     FROM public.parameters
-    WHERE parameter_type_code IN (
-        'TYPE-001', 'TYPE-003', 'TYPE-004', 'TYPE-005'
-    )
-) AS checked
-LEFT JOIN public.parameter_types AS param_type
-    ON checked.parameter_type_code = param_type.code
-WHERE checked.parameter_value < checked.whole_value
-   OR checked.parameter_value > checked.whole_value
-ORDER BY checked.batch_code, checked.parameter_type_code;
+    GROUP BY batch_code
+) AS batch_counts
+    ON batch_counts.batch_code = batch.code
+WHERE COALESCE(batch_counts.parameter_count, 0) < 5
+   OR COALESCE(batch_counts.parameter_count, 0) > 5
+ORDER BY batch_code;
 
--- 5. Единицы измерения каждого типа параметра для сверки с ТЗ
+
 SELECT
+    param.code AS parameter_code,
+    param.batch_code,
+    param.parameter_type_code,
     param_type.name AS parameter_name,
-    param.measurement_unit_code AS unit_code,
-    unit.name AS unit_name,
-    COUNT(*) AS record_count
+    param.parameter_value,
+    unit.name AS unit_name
 FROM public.parameters AS param
 LEFT JOIN public.parameter_types AS param_type
-    ON param.parameter_type_code = param_type.code
+    ON param_type.code = param.parameter_type_code
 LEFT JOIN public.measurement_units AS unit
-    ON param.measurement_unit_code = unit.code
-GROUP BY
+    ON unit.code = param.measurement_unit_code
+WHERE param.parameter_value IS NULL
+   OR param_type.code IS NULL
+   OR (param.parameter_type_code = 'TYPE-002'
+       AND (param.parameter_value < -58 OR param.parameter_value > 58))
+   OR (param.parameter_type_code = 'TYPE-003'
+       AND (param.parameter_value < 500 OR param.parameter_value > 900))
+   OR (param.parameter_type_code = 'TYPE-004'
+       AND (param.parameter_value < 0 OR param.parameter_value > 59))
+   OR (param.parameter_type_code = 'TYPE-005'
+       AND (param.parameter_value < 0 OR param.parameter_value > 15))
+   OR (param.parameter_type_code = 'TYPE-006'
+       AND (param.parameter_value < 0 OR param.parameter_value > 150))
+ORDER BY batch_code, parameter_code;
+
+
+SELECT
+    param.code AS parameter_code,
+    param.batch_code,
     param.parameter_type_code,
-    param_type.name,
-    param.measurement_unit_code,
-    unit.name
-ORDER BY param.parameter_type_code, param.measurement_unit_code;
+    param_type.name AS parameter_name,
+    param.measurement_unit_code AS unit_code,
+    unit.name AS unit_name
+FROM public.parameters AS param
+LEFT JOIN public.parameter_types AS param_type
+    ON param_type.code = param.parameter_type_code
+LEFT JOIN public.measurement_units AS unit
+    ON unit.code = param.measurement_unit_code
+WHERE param_type.code IS NULL
+   OR unit.code IS NULL
+   OR NOT
+   (
+       (param.parameter_type_code = 'TYPE-001' AND unit.code = 'UNIT-001')
+       OR (param.parameter_type_code = 'TYPE-002' AND unit.code = 'UNIT-002')
+       OR (param.parameter_type_code = 'TYPE-003' AND unit.code = 'UNIT-003')
+       OR (param.parameter_type_code = 'TYPE-004' AND unit.code = 'UNIT-004')
+       OR (param.parameter_type_code = 'TYPE-005' AND unit.code = 'UNIT-005')
+       OR (param.parameter_type_code = 'TYPE-006' AND unit.code = 'UNIT-001')
+   )
+ORDER BY batch_code, parameter_code;
