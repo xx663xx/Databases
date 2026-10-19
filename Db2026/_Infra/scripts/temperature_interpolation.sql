@@ -1,5 +1,52 @@
 DO $$
 BEGIN
+    ALTER TABLE public.temperature_corrections
+    ADD COLUMN temperature NUMERIC(4,1);
+
+    UPDATE public.temperature_corrections
+    SET temperature = -58
+    WHERE temperature_category = 'Ниже 0';
+
+    UPDATE public.temperature_corrections
+    SET temperature = 0
+    WHERE temperature_category = '0 - 5';
+
+    UPDATE public.temperature_corrections
+    SET temperature = 10
+    WHERE temperature_category = '10 - 15';
+
+    UPDATE public.temperature_corrections
+    SET temperature = 20
+    WHERE temperature_category = '20';
+
+    UPDATE public.temperature_corrections
+    SET temperature = 25
+    WHERE temperature_category = '25';
+
+    UPDATE public.temperature_corrections
+    SET temperature = 30
+    WHERE temperature_category = '30';
+
+    UPDATE public.temperature_corrections
+    SET temperature = 40
+    WHERE temperature_category = '40';
+
+    INSERT INTO public.temperature_corrections (temperature, correction)
+    SELECT 5, correction
+    FROM public.temperature_corrections
+    WHERE temperature = 0;
+
+    INSERT INTO public.temperature_corrections (temperature, correction)
+    SELECT 15, correction
+    FROM public.temperature_corrections
+    WHERE temperature = 10;
+
+    ALTER TABLE public.temperature_corrections
+    DROP COLUMN temperature_category;
+
+    COMMENT ON COLUMN public.temperature_corrections.temperature
+    IS 'Опорная температура, °C';
+
     CREATE TYPE public.interpolation_bounds AS (
         x0 NUMERIC,
         y0 NUMERIC,
@@ -22,43 +69,25 @@ BEGIN
             SELECT correction, correction
             INTO temperature_bounds.y0, temperature_bounds.y1
             FROM public.temperature_corrections
-            WHERE temperature_category = 'Ниже 0';
+            WHERE temperature < 0
+            ORDER BY temperature DESC
+            LIMIT 1;
 
             RETURN temperature_bounds;
         END IF;
 
-        SELECT points.temperature, corrections.correction
+        SELECT temperature, correction
         INTO temperature_bounds.x0, temperature_bounds.y0
-        FROM public.temperature_corrections AS corrections
-        INNER JOIN (
-            SELECT '0 - 5' AS temperature_category, 0 AS temperature
-            UNION ALL SELECT '0 - 5', 5
-            UNION ALL SELECT '10 - 15', 10
-            UNION ALL SELECT '10 - 15', 15
-            UNION ALL SELECT '20', 20
-            UNION ALL SELECT '25', 25
-            UNION ALL SELECT '30', 30
-            UNION ALL SELECT '40', 40
-        ) AS points ON points.temperature_category = corrections.temperature_category
-        WHERE points.temperature <= p_temperature
-        ORDER BY points.temperature DESC
+        FROM public.temperature_corrections
+        WHERE temperature <= p_temperature
+        ORDER BY temperature DESC
         LIMIT 1;
 
-        SELECT points.temperature, corrections.correction
+        SELECT temperature, correction
         INTO temperature_bounds.x1, temperature_bounds.y1
-        FROM public.temperature_corrections AS corrections
-        INNER JOIN (
-            SELECT '0 - 5' AS temperature_category, 0 AS temperature
-            UNION ALL SELECT '0 - 5', 5
-            UNION ALL SELECT '10 - 15', 10
-            UNION ALL SELECT '10 - 15', 15
-            UNION ALL SELECT '20', 20
-            UNION ALL SELECT '25', 25
-            UNION ALL SELECT '30', 30
-            UNION ALL SELECT '40', 40
-        ) AS points ON points.temperature_category = corrections.temperature_category
-        WHERE points.temperature >= p_temperature
-        ORDER BY points.temperature
+        FROM public.temperature_corrections
+        WHERE temperature >= p_temperature
+        ORDER BY temperature
         LIMIT 1;
 
         IF temperature_bounds.x0 IS NULL OR temperature_bounds.x1 IS NULL THEN
