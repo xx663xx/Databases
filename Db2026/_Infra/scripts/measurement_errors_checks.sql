@@ -55,3 +55,75 @@ SELECT
     r.errors AS "Полученное описание"
 FROM results AS r
 ORDER BY r.test_name;
+
+WITH checks AS (
+    SELECT test_name, actual, expected
+    FROM (
+        VALUES
+            ('Дата из ТЗ', public.format_meteo_datetime(TIMESTAMP '2026-10-24 09:30:00'), '24093'),
+            ('Первый день и полночь', public.format_meteo_datetime(TIMESTAMP '2026-10-01 00:00:00'), '01000'),
+            ('Минуты меньше десяти', public.format_meteo_datetime(TIMESTAMP '2026-10-09 09:09:00'), '09090'),
+            ('Последние минуты месяца', public.format_meteo_datetime(TIMESTAMP '2026-10-31 23:59:00'), '31235'),
+            ('Нулевая высота', public.format_meteo_height(0), '0000'),
+            ('Высота из ТЗ', public.format_meteo_height(60), '0060'),
+            ('Отрицательная высота', public.format_meteo_height(-60), '-060'),
+            ('Четырехзначная высота', public.format_meteo_height(9999), '9999'),
+            ('Давление без отклонения', public.calculate_meteo_pressure(750)::TEXT, '0'),
+            ('Положительное отклонение давления', public.calculate_meteo_pressure(757)::TEXT, '7'),
+            ('Отрицательное отклонение давления', public.calculate_meteo_pressure(743)::TEXT, '-7'),
+            ('Температура 23 из ТЗ', public.calculate_meteo_temperature(23)::TEXT, '9'),
+            ('Температура 25 из ТЗ', public.calculate_meteo_temperature(25)::TEXT, '11'),
+            ('Нижняя граница температуры', public.calculate_meteo_temperature(-58)::TEXT, '-74'),
+            ('Нулевая температура', public.calculate_meteo_temperature(0)::TEXT, '-15'),
+            ('Поправка внутри интервала 0-5', public.calculate_meteo_temperature(3)::TEXT, '-12'),
+            ('Последняя опорная температура', public.calculate_meteo_temperature(40)::TEXT, '29'),
+            ('Температура выше таблицы', public.calculate_meteo_temperature(50)::TEXT, '39'),
+            ('Верхняя граница температуры', public.calculate_meteo_temperature(58)::TEXT, '47'),
+            ('БББТТ из ТЗ', public.format_meteo_pressure_temperature(765, 25), '01511'),
+            ('Положительное давление 7', public.format_meteo_pressure_temperature(757, 23), '00709'),
+            ('Положительное давление 13', public.format_meteo_pressure_temperature(763, 23), '01309'),
+            ('Отрицательное давление 7', public.format_meteo_pressure_temperature(743, 23), '50709'),
+            ('Отрицательное давление 13', public.format_meteo_pressure_temperature(737, 23), '51309'),
+            ('Отрицательная температура', public.format_meteo_pressure_temperature(750, 0), '00065'),
+            ('Граница двух цифр ТТ', public.format_meteo_pressure_temperature(750, -33), '00099'),
+            ('Нижняя граница давления', public.format_meteo_pressure_temperature(500, 23), '75009'),
+            ('Верхняя граница давления', public.format_meteo_pressure_temperature(900, 23), '15009'),
+            ('БББТТ при температуре 58', public.format_meteo_pressure_temperature(750, 58), '00047')
+    ) AS examples(test_name, actual, expected)
+
+    UNION ALL
+
+    SELECT
+        'Полный заголовок из ТЗ',
+        public.calculate_meteo_header(
+            ROW(1, 100, 25, 765, 15, 6, NULL)::public.measurement_parameters,
+            TIMESTAMP '2026-10-24 09:30:00'
+        ),
+        '24093 0100 01511'
+
+    UNION ALL
+
+    SELECT
+        'Заголовок для второго типа оборудования',
+        public.calculate_meteo_header(
+            ROW(2, 60, 23, 743, 15, NULL, 80)::public.measurement_parameters,
+            TIMESTAMP '2026-10-24 09:30:00'
+        ),
+        '24093 0060 50709'
+
+    UNION ALL
+
+    SELECT
+        'Текущая дата по умолчанию',
+        public.calculate_meteo_header(
+            ROW(1, 100, 25, 765, 15, 6, NULL)::public.measurement_parameters
+        ),
+        public.format_meteo_datetime(LOCALTIMESTAMP) || ' 0100 01511'
+)
+SELECT
+    test_name AS "Проверка",
+    CASE WHEN actual = expected THEN 'OK' ELSE 'Ошибка' END AS "Результат",
+    expected AS "Ожидание",
+    actual AS "Получено"
+FROM checks
+ORDER BY test_name;
